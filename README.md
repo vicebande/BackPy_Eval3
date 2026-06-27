@@ -104,3 +104,9 @@ Los logs de la aplicación se transmiten en tiempo real a **Amazon CloudWatch Lo
 * **Grupo de Logs**: `/ecs/product-service`
 * **Prefijo de Logs**: `ecs`
 * Esto permite realizar el análisis de errores e inspeccionar llamadas HTTP del catálogo o la búsqueda de productos.
+
+---
+
+## ⚡ Estado del Despliegue
+* **Último Commit**: Despliegue inicial activado vía GitHub Actions.
+
