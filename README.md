@@ -1,78 +1,106 @@
-# Backend 2 - Product Service
+# Backend 2 - Product Service (Python Flask)
 
-Backend en Python (Flask) para gestión de productos con base de datos MySQL.
+Servicio backend desarrollado en Python con Flask para la gestión y catalogación de productos con persistencia en una base de datos MySQL. Este servicio forma parte de la **Evaluación Parcial N°3 de Introducción a Herramientas DevOps**.
 
-## Características
+---
 
-- API REST para gestión de productos
-- CRUD completo de productos
-- Búsqueda por nombre, precio y stock
-- Base de datos MySQL
-- Configuración vía archivo .env
+## 🚀 Ejecución Local
 
-## Requisitos
+### Opción 1: Tradicional (Manual)
 
-- Python 3.8 o superior
-- MySQL 8.0 o superior
-- pip
+1. **Requisitos**: Python 3.8+ y MySQL 8.0+.
+2. **Configuración**:
+   ```bash
+   cp .env.example .env
+   ```
+   Configure sus credenciales en `.env` (puerto por defecto `8082`).
+3. **Inicialización**:
+   ```bash
+   pip install -r requirements.txt
+   python app.py
+   ```
 
-## Configuración
+### Opción 2: Con Docker (Individual)
 
-1. Copiar el archivo de ejemplo:
-```bash
-cp .env.example .env
-```
+1. **Construir la imagen**:
+   ```bash
+   docker build -t products-backend:latest .
+   ```
+2. **Ejecutar el contenedor** (requiere una base de datos externa accesible):
+   ```bash
+   docker run -d -p 8082:8082 \
+     -e DB_HOST=host.docker.internal \
+     -e DB_PORT=3306 \
+     -e DB_USER=root \
+     -e DB_PASSWORD=tu_password \
+     -e DB_NAME=products_db \
+     products-backend:latest
+   ```
 
-2. Editar `.env` con sus credenciales de MySQL:
-```
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=tu_password
-DB_NAME=products_db
-PORT=8082
-```
+---
 
-3. Crear la base de datos en MySQL:
-```sql
-CREATE DATABASE products_db;
-```
+## 🏛️ Arquitectura de Despliegue en AWS (ECS Fargate)
 
-## Instalación
+Este servicio está diseñado para ejecutarse en la nube utilizando la siguiente infraestructura de Amazon Web Services (AWS):
 
-```bash
-pip install -r requirements.txt
-```
+* **AWS ECS Fargate**: Cómputo serverless para contenedores. Evita administrar instancias EC2 y reduce costos en laboratorios.
+* **AWS ECR**: Repositorio privado para almacenar las imágenes de contenedor (`eva3-products-repo`).
+* **Application Load Balancer (ALB)**: Distribuye el tráfico hacia las tareas de ECS. Para este proyecto, se implementa en conjunto con el Frontend y el otro Backend:
+  * Tráfico hacia `/api/products*` se enruta al puerto `8082` de `product-service`.
+* **Amazon RDS (MySQL)**: Base de datos relacional administrada, compartida o exclusiva para persistencia.
+* **AWS Systems Manager (SSM) Parameter Store**: Almacenamiento seguro de credenciales (`DB_PASSWORD`).
 
-## Ejecutar
+---
 
-```bash
-python app.py
-```
+## 🛡️ Gestión de Secrets y Seguridad (IE5)
 
-El servidor iniciará en el puerto 8082.
+Para dar cumplimiento estricto a las normas de seguridad del indicador **IE5** (Gestión de Secrets y credenciales sin exposición):
+1. **SSM Parameter Store**: El password de base de datos se guarda de forma segura en el parámetro `/eva3/db/password` tipo `SecureString`.
+2. **Inyección en ECS**: En la definición de tarea (`task-definition.json`), no se expone el password en texto plano. Se referencia mediante el bloque `secrets`:
+   ```json
+   "secrets": [
+     {
+       "name": "DB_PASSWORD",
+       "valueFrom": "arn:aws:ssm:us-east-1:<ACCOUNT_ID>:parameter/eva3/db/password"
+     }
+   ]
+   ```
+3. **AWS Academy / LabRole**: Durante el despliegue en AWS Academy Learner Lab, se debe utilizar el rol pre-creado `LabRole` como **Task Execution Role** y **Task Role**. Este rol tiene permisos asignados para leer de Systems Manager.
 
-## Endpoints
+---
 
-- `POST /api/products` - Crear nuevo producto
-- `GET /api/products` - Obtener todos los productos
-- `GET /api/products/{id}` - Obtener producto por ID
-- `GET /api/products/search?name=xxx` - Buscar productos por nombre
-- `GET /api/products/search?minPrice=xxx&maxPrice=yyy` - Buscar por rango de precio
-- `GET /api/products/search?minStock=xxx` - Buscar por stock mínimo
-- `PUT /api/products/{id}` - Actualizar producto
-- `DELETE /api/products/{id}` - Eliminar producto
+## 📈 Configuración de Autoscaling (IE3)
 
-## Ejemplo de Uso
+Para garantizar la alta disponibilidad y tolerancia a fallos del servicio de productos:
+* **Métrica objetivo**: CPU Utilization promedio de las tareas.
+* **Umbral de escala (Target Tracking)**: **50%**.
+  * **Justificación del umbral**: Un umbral del 50% es ideal para entornos de producción de carga variable. Permite absorber ráfagas repentinas de tráfico mientras Fargate aprovisiona nuevas tareas (lo cual toma entre 1 y 2 minutos) sin saturar las tareas existentes ni degradar la experiencia de usuario.
+* **Límites de escala**: Mínimo 1 tarea, Máximo 3 tareas (diseñado para mantener el presupuesto controlado en AWS Academy).
 
-Crear producto:
-```bash
-curl -X POST http://localhost:8082/api/products \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Laptop HP","description":"Laptop de 15.6 pulgadas","price":899.99,"stock":15,"icon":"💻"}'
-```
+---
 
-Obtener productos:
-```bash
-curl http://localhost:8082/api/products
-```
+## 🔄 Pipeline CI/CD con GitHub Actions (IE4)
+
+El archivo `.github/workflows/deploy.yml` automatiza todo el ciclo de entrega continua (build ➡️ push ➡️ deploy):
+
+1. **Gatillo**: Empujar cambios a las ramas `main` o `master`.
+2. **Inicio y autenticación**: Configura credenciales usando `aws-actions/configure-aws-credentials` y Secrets de GitHub.
+3. **Login en ECR**: Se loguea al registro privado con `aws-actions/amazon-ecr-login`.
+4. **Construcción y etiquetado**: Genera la imagen Docker etiquetándola con el hash del commit (`github.sha`) y la etiqueta `latest`.
+5. **Subida**: Empuja ambas imágenes a Amazon ECR.
+6. **Actualización de ECS**: Modifica la definición de tarea (`task-definition.json`) con la nueva imagen y despliega la actualización en ECS actualizando el servicio (`product-service`).
+
+### Configuración de GitHub Secrets Necesarios:
+* `AWS_ACCESS_KEY_ID`: Credencial temporal de AWS.
+* `AWS_SECRET_ACCESS_KEY`: Credencial temporal de AWS.
+* `AWS_SESSION_TOKEN`: Token de sesión de AWS Academy (obligatorio en Learner Labs).
+* `AWS_REGION`: Región de despliegue (ej. `us-east-1`).
+
+---
+
+## 📊 Logs y Monitoreo (IE6)
+
+Los logs de la aplicación se transmiten en tiempo real a **Amazon CloudWatch Logs** mediante el driver `awslogs` configurado en `task-definition.json`.
+* **Grupo de Logs**: `/ecs/product-service`
+* **Prefijo de Logs**: `ecs`
+* Esto permite realizar el análisis de errores e inspeccionar llamadas HTTP del catálogo o la búsqueda de productos.
